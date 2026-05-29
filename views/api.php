@@ -6,7 +6,7 @@
  */
 
 define('SPREADSHEET_ID',   '1QIpax_ruAJeZETenKARrlnmfAAIY0eL5oi3H7o578BE');
-define('SHEET_RANGE',      'Hoa 12H1 Ca B81!A3:Z1000');
+define('SHEET_RANGE',      'Hoa 12H1 Ca A21!A3:Z1000');
 define('CREDENTIALS_FILE', __DIR__ . '/credentials.json');
 define('TOKEN_FILE',       __DIR__ . '/token_cache.json');
 define('CACHE_DURATION',   30); // Cache 30 giây — khớp polling interval

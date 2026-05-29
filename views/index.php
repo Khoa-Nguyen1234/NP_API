@@ -24,7 +24,7 @@
 //  CẤU HÌNH
 // =====================================================
 define('SPREADSHEET_ID',   '1QIpax_ruAJeZETenKARrlnmfAAIY0eL5oi3H7o578BE');
-define('SHEET_RANGE',      'Hoa 12H1 Ca B81!A3:Z1000');
+define('SHEET_RANGE',      'Hoa 12H1 Ca A21!A3:Z1000');
 define('CREDENTIALS_FILE', __DIR__ . '/credentials.json');
 define('TOKEN_FILE',       __DIR__ . '/token_cache.json');
 define('CACHE_DURATION',   300); // Cache PHP ban đầu 5 phút (api.php dùng 30s)
@@ -166,7 +166,7 @@ $initialHash = md5(json_encode($rows));
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Danh sách lớp Hoa 12H1 – Ca B81</title>
+  <title>Danh sách lớp Hoa 12H1 – Ca A21</title>
   <style>
     *,
     *::before,
@@ -531,7 +531,7 @@ $initialHash = md5(json_encode($rows));
       <div class="header-left">
         <span class="icon">📊</span>
         <div>
-          <h1>Danh sách lớp Hoa 12H1 – Ca B81</h1>
+          <h1>Danh sách lớp Hoa 12H1 – Ca A21</h1>
           <div class="meta">Tự động cập nhật mỗi 30 giây · Năm học 2025–2026</div>
         </div>
       </div>
@@ -561,7 +561,7 @@ $initialHash = md5(json_encode($rows));
             <li>Tạo <strong>Service Account</strong> → Tải file <code>JSON</code> về</li>
             <li>Đặt file vào cùng thư mục, đổi tên thành <code>credentials.json</code></li>
             <li>Vào Google Sheets → <strong>Share</strong> → thêm email Service Account (Viewer)</li>
-            <li>Chỉnh <code>SHEET_RANGE</code> nếu tên sheet khác <code>Hoa 12H1 Ca B81</code></li>
+            <li>Chỉnh <code>SHEET_RANGE</code> nếu tên sheet khác <code>Hoa 12H1 Ca A21</code></li>
           </ol>
         </div>
       <?php endif; ?>

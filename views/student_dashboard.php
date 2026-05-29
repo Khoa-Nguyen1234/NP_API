@@ -2,17 +2,16 @@
 
 /**
  * =====================================================
- *  STUDENT_DASHBOARD.PHP
- *  Trang cá nhân học sinh sau khi đăng nhập
- *  ─ Lấy dữ liệu từ Google Sheets
- *  ─ Lọc đúng 1 dòng theo mã HS + họ tên
- *  ─ Học sinh CHỈ xem thông tin của chính mình
+ *  STUDENT_DASHBOARD.PHP — Multi-sheet, All Ca A + B
+ *  - Tìm học sinh trên TẤT CẢ sheet (Ca A + Ca B)
+ *  - Khớp theo MÃ HS (cột 1) + HỌ TÊN (cột 3) + SĐT (cột 2)
+ *  - Chỉ lấy dữ liệu TRÊN dòng màu vàng (dòng trống phân cách)
+ *  - Nếu HS xuất hiện nhiều ca → hiển thị tab cho từng ca
  * =====================================================
  */
 
 session_start();
 
-// Bảo vệ route
 if (empty($_SESSION['student_ma_hs'])) {
     header('Location: student_login.php');
     exit;
@@ -22,98 +21,140 @@ $student_ma_hs  = $_SESSION['student_ma_hs'];
 $student_ho_ten = $_SESSION['student_ho_ten'];
 $student_sdt    = $_SESSION['student_sdt'];
 
-// ── Cấu hình Sheets ───────────────────────────────────
+// ── Cấu hình ─────────────────────────────────────────
 define('SPREADSHEET_ID',   '1QIpax_ruAJeZETenKARrlnmfAAIY0eL5oi3H7o578BE');
-define('SHEET_RANGE',      'Hoa 12H1 Ca B81!A3:Z1000');
 define('CREDENTIALS_FILE', __DIR__ . '/credentials.json');
 define('TOKEN_FILE',       __DIR__ . '/token_cache.json');
 define('CACHE_DURATION',   60);
 
+// Tất cả các sheet cần tìm (Ca A + Ca B)
+$ALL_SHEETS = [
+    ['name' => 'Hoa 12H1 Ca A21', 'range' => 'Hoa 12H1 Ca A21!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca A31', 'range' => 'Hoa 12H1 Ca A31!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca A41', 'range' => 'Hoa 12H1 Ca A41!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca A51', 'range' => 'Hoa 12H1 Ca A51!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca A52', 'range' => 'Hoa 12H1 Ca A52!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca A61', 'range' => 'Hoa 12H1 Ca A61!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca B71', 'range' => 'Hoa 12H1 Ca B71!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca B72', 'range' => 'Hoa 12H1 Ca B72!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca B73', 'range' => 'Hoa 12H1 Ca B73!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca B81', 'range' => 'Hoa 12H1 Ca B81!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca B82', 'range' => 'Hoa 12H1 Ca B82!A3:Z1000'],
+    ['name' => 'Hoa 12H1 Ca B83', 'range' => 'Hoa 12H1 Ca B83!A3:Z1000'],
+];
+
+// ── Helpers HTTP / JWT ────────────────────────────────
 function base64UrlEncode(string $d): string
 {
     return rtrim(strtr(base64_encode($d), '+/', '-_'), '=');
 }
+
 function httpGet(string $url, string $token): string
 {
     $ch = curl_init($url);
-    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => ["Authorization: Bearer $token"], CURLOPT_TIMEOUT => 10]);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => ["Authorization: Bearer $token"],
+        CURLOPT_TIMEOUT        => 15,
+    ]);
     $r = curl_exec($ch);
     if (curl_errno($ch)) throw new Exception(curl_error($ch));
     curl_close($ch);
     return $r;
 }
+
 function httpPost(string $url, string $body): string
 {
     $ch = curl_init($url);
-    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body, CURLOPT_TIMEOUT => 10, CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded']]);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $body,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded'],
+    ]);
     $r = curl_exec($ch);
     if (curl_errno($ch)) throw new Exception(curl_error($ch));
     curl_close($ch);
     return $r;
 }
+
 function getAccessToken(): string
 {
     if (file_exists(TOKEN_FILE)) {
         $c = json_decode(file_get_contents(TOKEN_FILE), true);
         if ($c && $c['expires_at'] > time() + 30) return $c['access_token'];
     }
-    $creds = json_decode(file_get_contents(CREDENTIALS_FILE), true);
-    $now   = time() - 60;
-    $h     = base64UrlEncode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
-    $p     = base64UrlEncode(json_encode(['iss' => $creds['client_email'], 'scope' => 'https://www.googleapis.com/auth/spreadsheets.readonly', 'aud' => 'https://oauth2.googleapis.com/token', 'exp' => $now + 3600, 'iat' => $now]));
+    $creds   = json_decode(file_get_contents(CREDENTIALS_FILE), true);
+    $now     = time() - 60;
+    $h       = base64UrlEncode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
+    $p       = base64UrlEncode(json_encode([
+        'iss'   => $creds['client_email'],
+        'scope' => 'https://www.googleapis.com/auth/spreadsheets.readonly',
+        'aud'   => 'https://oauth2.googleapis.com/token',
+        'exp'   => $now + 3600,
+        'iat'   => $now,
+    ]));
     openssl_sign("$h.$p", $sig, $creds['private_key'], 'SHA256');
-    $data  = json_decode(httpPost('https://oauth2.googleapis.com/token', http_build_query(['grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'assertion' => "$h.$p." . base64UrlEncode($sig)])), true);
+    $data = json_decode(httpPost(
+        'https://oauth2.googleapis.com/token',
+        http_build_query(['grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'assertion' => "$h.$p." . base64UrlEncode($sig)])
+    ), true);
     if (empty($data['access_token'])) throw new Exception($data['error_description'] ?? 'Token error');
     file_put_contents(TOKEN_FILE, json_encode(['access_token' => $data['access_token'], 'expires_at' => $now + ($data['expires_in'] ?? 3600)]));
     return $data['access_token'];
 }
-function getSheetRows(): array
+
+/**
+ * Lấy dữ liệu 1 sheet, CHỈ phần TRÊN dòng màu vàng
+ * (dòng màu vàng = dòng hoàn toàn trống phân cách danh sách chính thức
+ *  với danh sách học sinh thử/vãng lai bên dưới)
+ * Trả về mảng rows (hàng 0 = header, hàng 1+ = dữ liệu)
+ */
+function getSheetAboveYellow(string $range): array
 {
-    $cache = __DIR__ . '/sheet_cache.json';
-    if (file_exists($cache)) {
-        $c = json_decode(file_get_contents($cache), true);
+    $cacheKey  = sys_get_temp_dir() . '/np_sheet_' . md5($range) . '.json';
+    if (file_exists($cacheKey)) {
+        $c = json_decode(file_get_contents($cacheKey), true);
         if ($c && $c['cached_at'] > time() - CACHE_DURATION) return $c['data'];
     }
-    $url  = sprintf('https://sheets.googleapis.com/v4/spreadsheets/%s/values/%s', urlencode(SPREADSHEET_ID), urlencode(SHEET_RANGE));
+
+    $url  = sprintf(
+        'https://sheets.googleapis.com/v4/spreadsheets/%s/values/%s',
+        urlencode(SPREADSHEET_ID),
+        urlencode($range)
+    );
     $json = json_decode(httpGet($url, getAccessToken()), true);
-    if (isset($json['error'])) throw new Exception($json['error']['message']);
+    if (isset($json['error'])) throw new Exception('Sheets API: ' . $json['error']['message']);
     $rows = $json['values'] ?? [];
-    file_put_contents($cache, json_encode(['cached_at' => time(), 'data' => $rows]));
-    return $rows;
-}
 
-// ── Xử lý logout ─────────────────────────────────────
-if (isset($_GET['logout'])) {
-    session_destroy();
-    header('Location: student_login.php');
-    exit;
-}
-
-// ── Lấy dữ liệu & tìm dòng học sinh ─────────────────
-$error       = null;
-$headers     = [];
-$studentRow  = null;
-
-try {
-    $rows = getSheetRows();
-    if (!empty($rows)) {
-        $headers = $rows[0]; // Hàng 0 = header
-
-        // Tìm dòng có cả mã HS (cột 1) VÀ họ tên (cột 3) khớp chính xác
-        foreach (array_slice($rows, 1) as $row) {
-            $ma  = trim($row[1] ?? '');
-            $ten = trim($row[3] ?? '');
-            if ($ma === $student_ma_hs && $ten === $student_ho_ten) {
-                $studentRow = $row;
+    // Giữ header (hàng 0), cắt tại dòng trống đầu tiên sau header
+    $cut = [];
+    foreach ($rows as $i => $row) {
+        if ($i === 0) {
+            $cut[] = $row;
+            continue;
+        } // header luôn giữ
+        $allEmpty = true;
+        foreach ($row as $cell) {
+            if (trim((string)$cell) !== '') {
+                $allEmpty = false;
                 break;
             }
         }
+        if ($allEmpty) break; // dừng → bỏ phần dưới dòng vàng
+        $cut[] = $row;
     }
-} catch (Exception $e) {
-    $error = $e->getMessage();
+
+    file_put_contents($cacheKey, json_encode(['cached_at' => time(), 'data' => $cut]));
+    return $cut;
 }
 
-// ── Helper render badge điểm danh ────────────────────
+function isDateCol(string $h): bool
+{
+    return (bool)preg_match('/^\d{1,2}\/\d{2}/', trim($h));
+}
+
 function renderAttBadge(string $val): string
 {
     if ($val === '') return '<span class="att-empty">—</span>';
@@ -124,31 +165,125 @@ function renderAttBadge(string $val): string
     return '<span class="att-badge att-other">' . htmlspecialchars($val) . '</span>';
 }
 
-function isDateCol(string $h): bool
-{
-    return (bool) preg_match('/^\d{1,2}\/\d{2}/', trim($h));
+// ── Logout ────────────────────────────────────────────
+if (isset($_GET['logout'])) {
+    session_destroy();
+    header('Location: student_login.php');
+    exit;
 }
 
-// ── Tính thống kê điểm danh ───────────────────────────
-$stats = ['present' => 0, 'absent' => 0, 'other' => 0, 'total' => 0];
-if ($studentRow) {
-    foreach ($headers as $ci => $h) {
-        if (!isDateCol($h)) continue;
-        $v = strtolower(trim($studentRow[$ci] ?? ''));
-        if ($v === 'x') {
-            $stats['present']++;
-            $stats['total']++;
-        } elseif ($v === 'o') {
-            $stats['absent']++;
-            $stats['total']++;
-        } elseif ($v !== '' && $v !== '-') {
-            $stats['other']++;
-            $stats['total']++;
-        } elseif ($v === '-') { /* chưa học */
+// ── Tìm học sinh trên TẤT CẢ sheet ──────────────────
+// Cấu trúc cột cố định: 0=STT, 1=MÃ HS, 2=SĐT, 3=HỌ TÊN, 4+=ngày...
+// Khớp theo: MÃ HS (cột 1) + HỌ TÊN (cột 3) + SĐT (cột 2)
+$error     = null;
+$matches   = []; // mảng: [['sheet'=>name,'headers'=>[],'row'=>[]]]
+
+try {
+    foreach ($ALL_SHEETS as $sheet) {
+        $rows = getSheetAboveYellow($sheet['range']);
+        if (count($rows) < 2) continue; // không có data
+        $hdrs = $rows[0];
+
+        foreach (array_slice($rows, 1) as $row) {
+            $ma  = trim($row[1] ?? '');
+            $sdt = trim($row[2] ?? '');
+            $ten = trim($row[3] ?? '');
+
+            // Bỏ qua hàng hoàn toàn trống
+            if ($ma === '' && $sdt === '' && $ten === '') continue;
+
+            /**
+             * Quy tắc khớp theo loại ca:
+             *   - Ca A (ca chính): bắt buộc khớp CẢ 3 — Mã HS + Họ Tên + SĐT
+             *   - Ca B, C, D... : chỉ cần khớp 2   — Họ Tên + SĐT
+             *
+             * Nhận biết Ca A: tên sheet chứa " Ca A" (vd: "Hoa 12H1 Ca A21")
+             * Về sau thêm lớp mới / Ca C / Ca D... logic này vẫn tự động đúng.
+             */
+            $isCaA = (stripos($sheet['name'], ' Ca A') !== false);
+
+            $isMatch = $isCaA
+                ? ($ma === $student_ma_hs && $ten === $student_ho_ten && $sdt === $student_sdt)
+                : ($ten === $student_ho_ten && $sdt === $student_sdt);
+
+            if ($isMatch) {
+                $matches[] = [
+                    'sheet'   => $sheet['name'],
+                    'headers' => $hdrs,
+                    'row'     => $row,
+                ];
+                break; // mỗi sheet tìm 1 dòng duy nhất
+            }
         }
     }
+} catch (Exception $e) {
+    $error = $e->getMessage();
 }
-$attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 100) : 0;
+
+// ── Tổng hợp thống kê điểm danh qua tất cả ca ───────
+function calcStats(array $headers, array $row): array
+{
+    $s = ['present' => 0, 'absent' => 0, 'other' => 0, 'total' => 0];
+    foreach ($headers as $ci => $h) {
+        if (!isDateCol($h)) continue;
+        $v = strtolower(trim($row[$ci] ?? ''));
+        if ($v === 'x') {
+            $s['present']++;
+            $s['total']++;
+        } elseif ($v === 'o') {
+            $s['absent']++;
+            $s['total']++;
+        } elseif ($v !== '' && $v !== '-') {
+            $s['other']++;
+            $s['total']++;
+        }
+    }
+    return $s;
+}
+
+// Tổng hợp tất cả ca
+$totalStats = ['present' => 0, 'absent' => 0, 'other' => 0, 'total' => 0];
+foreach ($matches as $m) {
+    $s = calcStats($m['headers'], $m['row']);
+    foreach ($totalStats as $k => $_) $totalStats[$k] += $s[$k];
+}
+$totalRate = $totalStats['total'] > 0 ? round($totalStats['present'] / $totalStats['total'] * 100) : 0;
+
+// ── Lấy điểm & ghi chú từ match đầu tiên ───────────
+function getScoreAndNote(array $headers, array $row): array
+{
+    $score  = '';
+    $ghiChu = '';
+    // Điểm: cột 17 nếu có chữ số
+    $v17 = trim($row[17] ?? '');
+    if ($v17 !== '' && preg_match('/^\d/', $v17)) $score = $v17;
+    // Điểm fallback: cột cuối trùng tên "12/04"
+    if ($score === '') {
+        foreach (array_reverse($headers, true) as $ci => $h) {
+            if (trim($h) === '12/04') {
+                $v = trim($row[$ci] ?? '');
+                if ($v !== '' && preg_match('/^\d/', $v)) {
+                    $score = $v;
+                    break;
+                }
+            }
+        }
+    }
+    // Ghi chú
+    foreach ($headers as $ci => $h) {
+        if (mb_strtoupper(trim($h)) === 'GHI CHÚ') {
+            $ghiChu = trim($row[$ci] ?? '');
+            break;
+        }
+    }
+    return ['score' => $score, 'ghiChu' => $ghiChu];
+}
+
+$firstMatch  = $matches[0] ?? null;
+$scoreNote   = $firstMatch ? getScoreAndNote($firstMatch['headers'], $firstMatch['row']) : ['score' => '', 'ghiChu' => ''];
+$score       = $scoreNote['score'];
+$ghiChu      = $scoreNote['ghiChu'];
+$sheetLabels = array_column($matches, 'sheet');
 ?>
 <!DOCTYPE html>
 <html lang="vi">
@@ -156,7 +291,7 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($student_ho_ten) ?> – NP Dashboard</title>
+    <title><?= htmlspecialchars($student_ho_ten) ?> – NP Portal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
@@ -165,14 +300,13 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
         *::after {
             box-sizing: border-box;
             margin: 0;
-            padding: 0;
+            padding: 0
         }
 
         :root {
             --navy: #0a1628;
             --blue: #1560bd;
             --blue2: #1a75e8;
-            --sky: #5ba4f5;
             --green: #16a34a;
             --green2: #dcfce7;
             --red: #dc2626;
@@ -191,7 +325,7 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
             min-height: 100vh;
         }
 
-        /* ── Topbar ─────────────────────────────────────── */
+        /* ── Topbar ── */
         .topbar {
             background: linear-gradient(135deg, var(--navy) 0%, #112258 100%);
             color: #fff;
@@ -209,7 +343,7 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
         .topbar-left {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 10px
         }
 
         .topbar-logo {
@@ -225,19 +359,19 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
 
         .topbar-logo svg {
             width: 22px;
-            height: 14px;
+            height: 14px
         }
 
         .topbar-title {
             font-size: .9rem;
             font-weight: 800;
-            letter-spacing: -.2px;
+            letter-spacing: -.2px
         }
 
         .topbar-sub {
             font-size: .65rem;
             color: rgba(255, 255, 255, .55);
-            margin-top: 1px;
+            margin-top: 1px
         }
 
         .logout-btn {
@@ -258,22 +392,22 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
         }
 
         .logout-btn:hover {
-            background: rgba(255, 255, 255, .18);
+            background: rgba(255, 255, 255, .18)
         }
 
-        /* ── Layout ─────────────────────────────────────── */
+        /* ── Layout ── */
         .page {
-            max-width: 980px;
+            max-width: 1000px;
             margin: 0 auto;
-            padding: 1.5rem 1rem 3rem;
+            padding: 1.5rem 1rem 3rem
         }
 
-        /* ── Hero card ───────────────────────────────────── */
+        /* ── Hero ── */
         .hero {
             background: linear-gradient(135deg, var(--blue2) 0%, var(--blue) 100%);
             color: #fff;
             border-radius: 16px;
-            padding: 1.5rem 1.75rem;
+            padding: 1.4rem 1.75rem;
             margin-bottom: 1.2rem;
             display: flex;
             align-items: center;
@@ -310,13 +444,13 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
 
         .hero-info {
             flex: 1;
-            min-width: 180px;
+            min-width: 180px
         }
 
         .hero-name {
             font-size: 1.2rem;
             font-weight: 900;
-            letter-spacing: -.3px;
+            letter-spacing: -.3px
         }
 
         .hero-meta {
@@ -331,21 +465,26 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
         .hero-meta span {
             display: flex;
             align-items: center;
-            gap: 4px;
+            gap: 4px
+        }
+
+        .hero-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px
         }
 
         .hero-badge {
             background: rgba(255, 255, 255, .15);
             border: 1px solid rgba(255, 255, 255, .3);
             border-radius: 20px;
-            padding: 4px 14px;
-            font-size: .73rem;
+            padding: 4px 12px;
+            font-size: .72rem;
             font-weight: 800;
-            letter-spacing: .5px;
             white-space: nowrap;
         }
 
-        /* ── Stats row ───────────────────────────────────── */
+        /* ── Stats row ── */
         .stats-row {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
@@ -355,7 +494,7 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
 
         @media(max-width:560px) {
             .stats-row {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: repeat(2, 1fr)
             }
         }
 
@@ -373,7 +512,7 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
         }
 
         .stat-card:nth-child(3) {
-            animation-delay: .1s
+            animation-delay: .10s
         }
 
         .stat-card:nth-child(4) {
@@ -396,58 +535,58 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
             font-size: 1.9rem;
             font-weight: 900;
             line-height: 1;
-            margin-bottom: 4px;
+            margin-bottom: 4px
         }
 
         .stat-lbl {
             font-size: .7rem;
             color: var(--slate);
-            font-weight: 600;
+            font-weight: 600
         }
 
         .stat-green {
-            color: var(--green);
+            color: var(--green)
         }
 
         .stat-red {
-            color: var(--red);
+            color: var(--red)
         }
 
         .stat-amber {
-            color: var(--amber);
+            color: var(--amber)
         }
 
         .stat-blue {
-            color: var(--blue2);
+            color: var(--blue2)
         }
 
-        /* ── Rate bar ─────────────────────────────────────── */
         .rate-wrap {
             height: 6px;
             background: #e8f0fe;
             border-radius: 3px;
             margin-top: 7px;
-            overflow: hidden;
+            overflow: hidden
         }
 
         .rate-bar {
             height: 100%;
             border-radius: 3px;
             background: linear-gradient(90deg, var(--green), #22d3ee);
-            transition: width 1s ease;
+            transition: width 1s ease
         }
 
-        /* ── Section ──────────────────────────────────────── */
+        /* ── Section ── */
         .section {
             background: #fff;
             border-radius: 14px;
             border: 1px solid var(--border);
             box-shadow: 0 2px 10px rgba(0, 0, 0, .05);
             overflow: hidden;
+            margin-bottom: 1.2rem;
         }
 
         .section-header {
-            padding: .9rem 1.4rem;
+            padding: .85rem 1.4rem;
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
@@ -461,24 +600,19 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
             color: #1e2d45;
             display: flex;
             align-items: center;
-            gap: 7px;
+            gap: 7px
         }
 
-        /* ── Info table ───────────────────────────────────── */
+        /* ── Info grid ── */
         .info-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 0;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr))
         }
 
         .info-item {
             padding: .9rem 1.4rem;
             border-bottom: 1px solid var(--border);
             border-right: 1px solid var(--border);
-        }
-
-        .info-item:last-child {
-            border-bottom: none;
         }
 
         .info-lbl {
@@ -493,18 +627,63 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
         .info-val {
             font-size: .92rem;
             font-weight: 700;
-            color: #1e2d45;
+            color: #1e2d45
         }
 
-        /* ── Attendance table ─────────────────────────────── */
-        .att-table-wrap {
+        /* ── Tabs ── */
+        .tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid var(--border);
             overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .tabs::-webkit-scrollbar {
+            display: none
+        }
+
+        .tab-btn {
+            padding: .7rem 1.2rem;
+            font-family: inherit;
+            font-size: .78rem;
+            font-weight: 700;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--slate);
+            white-space: nowrap;
+            border-bottom: 2.5px solid transparent;
+            margin-bottom: -2px;
+            transition: color .2s, border-color .2s;
+        }
+
+        .tab-btn:hover {
+            color: var(--blue2)
+        }
+
+        .tab-btn.active {
+            color: var(--blue2);
+            border-bottom-color: var(--blue2)
+        }
+
+        /* ── Attendance table ── */
+        .att-table-wrap {
+            overflow-x: auto
+        }
+
+        .tab-panel {
+            display: none
+        }
+
+        .tab-panel.active {
+            display: block
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: .82rem;
+            font-size: .83rem
         }
 
         thead th {
@@ -518,36 +697,34 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
             font-size: .7rem;
             text-transform: uppercase;
             letter-spacing: .05em;
-            position: sticky;
-            top: 0;
         }
 
         thead th:first-child {
-            text-align: left;
+            text-align: left
         }
 
         tbody td {
             padding: 10px 12px;
             text-align: center;
-            border-bottom: 1px solid #f1f5f9;
+            border-bottom: 1px solid #f1f5f9
         }
 
         tbody td:first-child {
             text-align: left;
             font-weight: 600;
             color: #1e2d45;
-            font-size: .8rem;
+            font-size: .8rem
         }
 
         tbody tr:last-child td {
-            border-bottom: none;
+            border-bottom: none
         }
 
         tbody tr:hover {
-            background: #f8faff;
+            background: #f8faff
         }
 
-        /* ── Attendance badges ────────────────────────────── */
+        /* ── Attendance badges ── */
         .att-badge {
             display: inline-flex;
             align-items: center;
@@ -561,12 +738,12 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
 
         .att-present {
             background: var(--green2);
-            color: var(--green);
+            color: var(--green)
         }
 
         .att-absent {
             background: var(--red2);
-            color: var(--red);
+            color: var(--red)
         }
 
         .att-other {
@@ -581,20 +758,20 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
 
         .att-dash {
             background: #f1f5f9;
-            color: var(--slate);
+            color: var(--slate)
         }
 
         .att-empty {
             color: #cbd5e1;
-            font-size: 1rem;
+            font-size: 1rem
         }
 
-        /* ── Legend ────────────────────────────────────────── */
+        /* ── Legend ── */
         .legend {
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
-            align-items: center;
+            align-items: center
         }
 
         .leg-item {
@@ -606,7 +783,34 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
             font-weight: 600;
         }
 
-        /* ── Error ─────────────────────────────────────────── */
+        /* ── Not found ── */
+        .not-found {
+            background: #fff;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            padding: 3rem;
+            text-align: center;
+        }
+
+        .nf-icon {
+            font-size: 3.5rem;
+            margin-bottom: 1rem
+        }
+
+        .not-found h2 {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: #1e2d45;
+            margin-bottom: .5rem
+        }
+
+        .not-found p {
+            font-size: .82rem;
+            color: var(--slate);
+            line-height: 1.6
+        }
+
+        /* ── Error ── */
         .err-panel {
             background: #fef2f2;
             border: 1px solid #fecaca;
@@ -617,25 +821,44 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
             margin-bottom: 1rem;
         }
 
-        .no-data {
-            padding: 2.5rem;
+        /* ── Note box ── */
+        .note-box {
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 12px;
+            padding: 1rem 1.4rem;
+        }
+
+        .note-lbl {
+            font-size: .72rem;
+            font-weight: 800;
+            color: #92400e;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            margin-bottom: 6px;
+        }
+
+        .note-val {
+            font-size: .88rem;
+            color: #78350f;
+            font-weight: 600
+        }
+
+        footer {
             text-align: center;
+            margin-top: 2rem;
+            font-size: .68rem;
             color: var(--slate);
-            font-size: .9rem;
         }
 
-        /* ── Score ─────────────────────────────────────────── */
-        .score-big {
-            font-size: 2.4rem;
-            font-weight: 900;
-            color: var(--blue2);
-            line-height: 1;
-        }
+        @media(max-width:480px) {
+            .hero {
+                padding: 1.1rem 1.2rem
+            }
 
-        .score-lbl {
-            font-size: .7rem;
-            color: var(--slate);
-            margin-top: 4px;
+            .hero-name {
+                font-size: 1rem
+            }
         }
     </style>
 </head>
@@ -653,7 +876,7 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
             </div>
             <div>
                 <div class="topbar-title">NP Student Portal</div>
-                <div class="topbar-sub">Hoa 12H1 · Ca B81 · 2025–2026</div>
+                <div class="topbar-sub">Hoa 12H1 · 2025–2026</div>
             </div>
         </div>
         <a href="?logout=1" class="logout-btn">🚪 Đăng xuất</a>
@@ -671,164 +894,190 @@ $attendRate = $stats['total'] > 0 ? round($stats['present'] / $stats['total'] * 
             <div class="hero-info">
                 <div class="hero-name"><?= htmlspecialchars($student_ho_ten) ?></div>
                 <div class="hero-meta">
+                    <span>🆔 <?= htmlspecialchars($student_ma_hs) ?></span>
                     <span>📱 <?= htmlspecialchars($student_sdt) ?></span>
-                    <span>🏫 Lớp Hoa 12H1 – Ca B81</span>
                 </div>
             </div>
-            <div class="hero-badge">🔖 <?= htmlspecialchars($student_ma_hs) ?></div>
-        </div>
-
-        <!-- Stats -->
-        <?php if ($studentRow): ?>
-            <div class="stats-row">
-                <div class="stat-card">
-                    <div class="stat-val stat-blue"><?= $stats['total'] ?></div>
-                    <div class="stat-lbl">Tổng buổi tính</div>
-                    <div class="rate-wrap">
-                        <div class="rate-bar" style="width:<?= $attendRate ?>%"></div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-val stat-green"><?= $stats['present'] ?></div>
-                    <div class="stat-lbl">Có mặt (✓)</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-val stat-red"><?= $stats['absent'] ?></div>
-                    <div class="stat-lbl">Vắng mặt (✗)</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-val stat-amber"><?= $attendRate ?>%</div>
-                    <div class="stat-lbl">Tỷ lệ có mặt</div>
-                </div>
-            </div>
-        <?php endif; ?>
-
-        <!-- Thông tin cá nhân -->
-        <div class="section" style="margin-bottom:1.2rem">
-            <div class="section-header">
-                <div class="section-title">👤 Thông Tin Cá Nhân</div>
-            </div>
-            <div class="info-grid">
-                <div class="info-item">
-                    <div class="info-lbl">Mã Học Sinh</div>
-                    <div class="info-val" style="color:var(--blue2);font-family:monospace"><?= htmlspecialchars($student_ma_hs) ?></div>
-                </div>
-                <div class="info-item">
-                    <div class="info-lbl">Họ và Tên</div>
-                    <div class="info-val"><?= htmlspecialchars($student_ho_ten) ?></div>
-                </div>
-                <div class="info-item">
-                    <div class="info-lbl">Số Điện Thoại</div>
-                    <div class="info-val" style="font-family:monospace"><?= htmlspecialchars($student_sdt) ?></div>
-                </div>
-                <?php
-                // Lấy điểm (cột GHI CHÚ / cột 17 trong sheet)
-                $score = '';
-                if ($studentRow) {
-                    foreach ($headers as $ci => $h) {
-                        if (trim($h) === '12/04') {
-                            $v = trim($studentRow[$ci] ?? '');
-                            if ($v !== '' && preg_match('/^\d/', $v)) {
-                                $score = $v;
-                                break;
-                            }
-                        }
-                    }
-                    // Fallback: check cột index 17
-                    $v17 = trim($studentRow[17] ?? '');
-                    if ($score === '' && $v17 !== '' && preg_match('/^\d/', $v17)) $score = $v17;
-                }
-                ?>
-                <div class="info-item">
-                    <div class="info-lbl">Điểm Gần Nhất (12/04)</div>
-                    <div class="info-val">
-                        <?php if ($score): ?>
-                            <span style="color:var(--green);font-size:1.1rem;font-weight:900"><?= htmlspecialchars($score) ?></span>
-                        <?php else: ?>
-                            <span style="color:var(--slate)">Chưa có</span>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Bảng điểm danh -->
-        <div class="section">
-            <div class="section-header">
-                <div class="section-title">📅 Lịch Sử Điểm Danh</div>
-                <div class="legend">
-                    <span class="leg-item"><span class="att-badge att-present" style="width:22px;height:22px;font-size:.65rem">✓</span> Có mặt</span>
-                    <span class="leg-item"><span class="att-badge att-absent" style="width:22px;height:22px;font-size:.65rem">✗</span> Vắng</span>
-                    <span class="leg-item"><span class="att-badge att-other" style="height:20px;padding:0 7px;font-size:.62rem">B82</span> Ca khác</span>
-                </div>
-            </div>
-
-            <?php if (!$studentRow): ?>
-                <div class="no-data">
-                    😕 Không tìm thấy dữ liệu điểm danh cho học sinh này trong sheet.<br>
-                    <small style="color:var(--slate);font-size:.75rem">Có thể dữ liệu chưa được cập nhật vào Google Sheet.</small>
-                </div>
-            <?php else: ?>
-                <div class="att-table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style="text-align:left">Buổi học</th>
-                                <th>Điểm danh</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php
-                            $hasDates = false;
-                            foreach ($headers as $ci => $h) {
-                                if (!isDateCol($h)) continue;
-                                $hasDates = true;
-                                $val = trim($studentRow[$ci] ?? '');
-                                $label = trim($h);
-                                echo '<tr>';
-                                echo '<td>📆 ' . htmlspecialchars($label) . '</td>';
-                                echo '<td>' . renderAttBadge($val) . '</td>';
-                                echo '</tr>';
-                            }
-                            if (!$hasDates): ?>
-                                <tr>
-                                    <td colspan="2" class="no-data">Không có dữ liệu buổi học.</td>
-                                </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
+            <?php if (!empty($matches)): ?>
+                <div class="hero-badges">
+                    <?php foreach ($sheetLabels as $lbl): ?>
+                        <span class="hero-badge">🏫 <?= htmlspecialchars($lbl) ?></span>
+                    <?php endforeach; ?>
                 </div>
             <?php endif; ?>
         </div>
 
-        <!-- Ghi chú từ sheet -->
-        <?php
-        $ghiChu = '';
-        if ($studentRow) {
-            foreach ($headers as $ci => $h) {
-                if (mb_strtoupper(trim($h)) === 'GHI CHÚ') {
-                    $ghiChu = trim($studentRow[$ci] ?? '');
-                    break;
-                }
-            }
-        }
-        if ($ghiChu !== ''): ?>
-            <div style="margin-top:1rem;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:1rem 1.4rem;">
-                <div style="font-size:.72rem;font-weight:800;color:#92400e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📝 Ghi Chú</div>
-                <div style="font-size:.88rem;color:#78350f;font-weight:600"><?= htmlspecialchars($ghiChu) ?></div>
+        <?php if (empty($matches) && !$error): ?>
+            <!-- Không tìm thấy -->
+            <div class="not-found">
+                <div class="nf-icon">😕</div>
+                <h2>Không tìm thấy dữ liệu</h2>
+                <p>
+                    Mã HS <strong><?= htmlspecialchars($student_ma_hs) ?></strong>,
+                    họ tên <strong><?= htmlspecialchars($student_ho_ten) ?></strong>,
+                    SĐT <strong><?= htmlspecialchars($student_sdt) ?></strong><br>
+                    chưa xuất hiện trong danh sách chính thức của bất kỳ ca nào.<br><br>
+                    Vui lòng liên hệ <strong>Trung Tâm NP</strong> để được hỗ trợ.
+                </p>
             </div>
+
+        <?php else: ?>
+
+            <!-- Stats tổng hợp -->
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="stat-val stat-blue"><?= $totalStats['total'] ?></div>
+                    <div class="stat-lbl">Tổng buổi đã tính</div>
+                    <div class="rate-wrap">
+                        <div class="rate-bar" style="width:<?= $totalRate ?>%"></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val stat-green"><?= $totalStats['present'] ?></div>
+                    <div class="stat-lbl">Có mặt (✓)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val stat-red"><?= $totalStats['absent'] ?></div>
+                    <div class="stat-lbl">Vắng mặt (✗)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val stat-amber"><?= $totalRate ?>%</div>
+                    <div class="stat-lbl">Tỷ lệ có mặt</div>
+                </div>
+            </div>
+
+            <!-- Thông tin cá nhân -->
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">👤 Thông Tin Cá Nhân</div>
+                </div>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-lbl">Mã Học Sinh</div>
+                        <div class="info-val" style="color:var(--blue2);font-family:monospace"><?= htmlspecialchars($student_ma_hs) ?></div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-lbl">Họ và Tên</div>
+                        <div class="info-val"><?= htmlspecialchars($student_ho_ten) ?></div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-lbl">Số Điện Thoại</div>
+                        <div class="info-val" style="font-family:monospace"><?= htmlspecialchars($student_sdt) ?></div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-lbl">Ca học</div>
+                        <div class="info-val" style="color:var(--blue2);font-size:.82rem">
+                            <?= htmlspecialchars(implode(', ', $sheetLabels) ?: '—') ?>
+                        </div>
+                    </div>
+                    <?php if ($score !== ''): ?>
+                        <div class="info-item">
+                            <div class="info-lbl">Điểm Gần Nhất</div>
+                            <div class="info-val">
+                                <span style="color:var(--green);font-size:1.1rem;font-weight:900"><?= htmlspecialchars($score) ?></span>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <!-- Bảng điểm danh (tab nếu nhiều ca) -->
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">📅 Lịch Sử Điểm Danh</div>
+                    <div class="legend">
+                        <span class="leg-item"><span class="att-badge att-present" style="width:22px;height:22px;font-size:.65rem">✓</span> Có mặt</span>
+                        <span class="leg-item"><span class="att-badge att-absent" style="width:22px;height:22px;font-size:.65rem">✗</span> Vắng</span>
+                        <span class="leg-item"><span class="att-badge att-other" style="height:20px;padding:0 7px;font-size:.62rem">B82</span> Ca khác</span>
+                    </div>
+                </div>
+
+                <?php if (count($matches) > 1): ?>
+                    <!-- Nhiều ca → hiển thị tabs -->
+                    <div class="tabs" id="att-tabs">
+                        <?php foreach ($matches as $idx => $m): ?>
+                            <button class="tab-btn <?= $idx === 0 ? 'active' : '' ?>"
+                                onclick="switchTab(<?= $idx ?>)">
+                                <?= htmlspecialchars($m['sheet']) ?>
+                            </button>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php foreach ($matches as $idx => $m):
+                    $panelStats = calcStats($m['headers'], $m['row']);
+                    $panelRate  = $panelStats['total'] > 0 ? round($panelStats['present'] / $panelStats['total'] * 100) : 0;
+                ?>
+                    <div class="tab-panel <?= $idx === 0 ? 'active' : '' ?>" id="panel-<?= $idx ?>">
+
+                        <?php if (count($matches) > 1): ?>
+                            <!-- Mini stats per ca -->
+                            <div style="display:flex;gap:.6rem;padding:.8rem 1.2rem;border-bottom:1px solid var(--border);flex-wrap:wrap">
+                                <span style="font-size:.76rem;color:var(--blue2);font-weight:800">
+                                    📊 <?= $panelStats['present'] ?>✓ / <?= $panelStats['absent'] ?>✗ — <?= $panelRate ?>% có mặt
+                                </span>
+                            </div>
+                        <?php endif; ?>
+
+                        <div class="att-table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th style="text-align:left">Buổi học</th>
+                                        <th>Điểm danh</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php
+                                    $hasDates = false;
+                                    foreach ($m['headers'] as $ci => $h) {
+                                        if (!isDateCol($h)) continue;
+                                        $hasDates = true;
+                                        $val = trim($m['row'][$ci] ?? '');
+                                        echo '<tr>';
+                                        echo '<td>📆 ' . htmlspecialchars(trim($h)) . '</td>';
+                                        echo '<td>' . renderAttBadge($val) . '</td>';
+                                        echo '</tr>';
+                                    }
+                                    if (!$hasDates): ?>
+                                        <tr>
+                                            <td colspan="2" style="padding:2rem;text-align:center;color:var(--slate)">Không có dữ liệu buổi học.</td>
+                                        </tr>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+
+            <!-- Ghi chú -->
+            <?php if ($ghiChu !== ''): ?>
+                <div class="note-box">
+                    <div class="note-lbl">📝 Ghi Chú</div>
+                    <div class="note-val"><?= htmlspecialchars($ghiChu) ?></div>
+                </div>
+            <?php endif; ?>
+
         <?php endif; ?>
 
-        <p style="text-align:center;margin-top:2rem;font-size:.68rem;color:var(--slate)">
-            © 2025 Trung Tâm Giáo Dục Tri Thức NP · Dữ liệu từ Google Sheets · Chỉ bạn mới thấy thông tin của mình
-        </p>
+        <footer>© 2025 Trung Tâm Giáo Dục Tri Thức NP · Dữ liệu từ Google Sheets · Chỉ bạn mới thấy thông tin của mình</footer>
     </div>
 
     <script>
-        // Animate rate bar sau khi load
+        // ── Tab switching ───────────────────────────────
+        function switchTab(idx) {
+            document.querySelectorAll('.tab-btn').forEach((b, i) => {
+                b.classList.toggle('active', i === idx);
+            });
+            document.querySelectorAll('.tab-panel').forEach((p, i) => {
+                p.classList.toggle('active', i === idx);
+            });
+        }
+
+        // ── Animate rate bar ─────────────────────────────
         window.addEventListener('load', function() {
-            var bars = document.querySelectorAll('.rate-bar');
-            bars.forEach(function(b) {
+            document.querySelectorAll('.rate-bar').forEach(function(b) {
                 var w = b.style.width;
                 b.style.width = '0';
                 setTimeout(function() {
