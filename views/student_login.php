@@ -13,7 +13,7 @@ session_start();
 
 // Nếu đã đăng nhập → chuyển thẳng vào dashboard
 if (!empty($_SESSION['student_ma_hs'])) {
-    header('Location: student_dashboard.php');
+    header('Location: attendance.php');
     exit;
 }
 
@@ -81,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['student_ma_hs']  = $student['ma_hs'];
                     $_SESSION['student_ho_ten'] = $student['ho_ten'];
                     $_SESSION['student_sdt']    = $student['sdt'];
-                    header('Location: student_dashboard.php');
+                    header('Location: attendance.php');
                     exit;
                 }
             }

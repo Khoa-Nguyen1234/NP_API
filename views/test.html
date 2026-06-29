@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Allotrope Demo</title>
+
+<style>
+@font-face {
+    font-family: 'Allotrope';
+    src: url('Allotrope-BlackItalic.otf') format('opentype');
+}
+
+body{
+    margin:0;
+    background:#1a1028;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+}
+
+.title{
+    font-family:'Allotrope', sans-serif;
+    font-size:120px;
+    line-height:0.9;
+    text-transform:uppercase;
+    font-style:italic;
+    color:#f6ede8;
+
+    /* Viền đen */
+    -webkit-text-stroke: 8px #2a1830;
+
+    /* Viền hồng + bóng */
+    text-shadow:
+        4px 4px 0 #ff4fb3,
+        -4px 4px 0 #ff4fb3,
+        4px -4px 0 #ff4fb3,
+        -4px -4px 0 #ff4fb3,
+        8px 8px 0 rgba(0,0,0,0.4);
+
+    transform: skewX(-8deg);
+    text-align:center;
+}
+</style>
+</head>
+<body>
+
+<div class="title">
+    TRY ONE OF OUR<br>
+    FAVORITES
+</div>
+
+</body>
+</html>

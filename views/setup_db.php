@@ -36,6 +36,8 @@ const SHEETS = [
     ['name' => 'Hoa 12H1 Ca B81', 'range' => 'Hoa 12H1 Ca B81!A3:Z1000'],
     ['name' => 'Hoa 12H1 Ca B82', 'range' => 'Hoa 12H1 Ca B82!A3:Z1000'],
     ['name' => 'Hoa 12H1 Ca B83', 'range' => 'Hoa 12H1 Ca B83!A3:Z1000'],
+    ['name' => 'Hóa 9 Chuyên 1',  'range' => 'Hóa 9 Chuyên 1!A3:Z1000'],
+    ['name' => 'Hóa 9 Chuyên 2',  'range' => 'Hóa 9 Chuyên 2!A3:Z1000'],
 ];
 
 // ─────────────────────────────────────────────────────

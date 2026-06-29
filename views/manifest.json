@@ -1,0 +1,49 @@
+{
+  "name": "Trung Tâm Giáo Dục Tri Thức NP",
+  "short_name": "Trung Tâm Giáo Dục Tri Thức NP",
+  "description": "Thầy dạy dễ hiểu - Trò học hiệu quả",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1565c0",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Screenshot%202026-06-09%20221852-eFYcZs9Oh7Z8uLwh28PTSFXBYsw3v9.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Screenshot%202026-06-09%20221852-eFYcZs9Oh7Z8uLwh28PTSFXBYsw3v9.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Screenshot%202026-06-09%20221852-eFYcZs9Oh7Z8uLwh28PTSFXBYsw3v9.png",
+      "sizes": "540x720",
+      "type": "image/png",
+      "form_factor": "narrow"
+    }
+  ],
+  "categories": ["education"],
+  "shortcuts": [
+    {
+      "name": "Về Chúng Tôi",
+      "short_name": "About",
+      "description": "Tìm hiểu về Trung Tâm Giáo Dục Tri Thức NP",
+      "url": "#about",
+      "icons": [
+        {
+          "src": "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Screenshot%202026-06-09%20221852-eFYcZs9Oh7Z8uLwh28PTSFXBYsw3v9.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}
